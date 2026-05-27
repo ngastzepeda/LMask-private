@@ -1,0 +1,29 @@
+NAME : inst_248.742482042.tour
+COMMENT : Length = 742482042
+COMMENT : Found by LKH-3 [Keld Helsgaun] Mon May 11 17:46:44 2026
+TYPE : TOUR
+DIMENSION : 21
+TOUR_SECTION
+1
+5
+4
+3
+2
+6
+8
+9
+12
+7
+10
+18
+17
+16
+15
+11
+14
+13
+20
+21
+19
+-1
+EOF
