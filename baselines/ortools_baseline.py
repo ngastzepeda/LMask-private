@@ -1,13 +1,15 @@
 import os
 import sys
 import time
+
 import numpy as np
 
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(curr_dir, os.pardir))
 sys.path.append(project_root)
-from tensordict.tensordict import TensorDict
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+from tensordict.tensordict import TensorDict
+
 from baselines.utils import scale
 
 ORTOOLS_SCALING_FACTOR = 1000
@@ -19,7 +21,9 @@ def ortools_solve(td: TensorDict, max_runtime: float = 100, log_search: bool = F
     num_nodes = len(distance_matrix)
 
     # Create the routing index manager
-    manager = pywrapcp.RoutingIndexManager(num_nodes, data["num_vehicles"], data["depot"])
+    manager = pywrapcp.RoutingIndexManager(
+        num_nodes, data["num_vehicles"], data["depot"]
+    )
     # Create Routing Model
     routing = pywrapcp.RoutingModel(manager)
 
@@ -31,36 +35,46 @@ def ortools_solve(td: TensorDict, max_runtime: float = 100, log_search: bool = F
         # TODO: There are some issues with the draft limit constraint
         demand = data["demand"]
         draft_limit = data["draft_limit"]
+
         # Create and register a demand callback
         def demand_callback(from_index):
             from_node = manager.IndexToNode(from_index)
             return demand[from_node]
-        demand_callback_idx = routing.RegisterUnaryTransitCallback(demand_callback) 
+
+        demand_callback_idx = routing.RegisterUnaryTransitCallback(demand_callback)
         # Add load dimension
         routing.AddDimension(
             demand_callback_idx,
-            0, # no slack
+            0,  # no slack
             sum(demand),
             True,
             "Load",
         )
         load_dimension = routing.GetDimensionOrDie("Load")
-        
+
         # Add draft limit constraint for each location excluding the depot
         for node in range(0, num_nodes):
             index = manager.NodeToIndex(node)
             # Current load when arriving at this node must <= its draft limit
             load_dimension.CumulVar(index).SetRange(0, draft_limit[node])
-    
-    if "time_windows" in data.keys(): 
+
+    if "time_windows" in data.keys():
         # create a time transit callback
-        depot_tw_late = data["time_windows"][0][1]  # depot time window is [0, depot_tw_late]
+        depot_tw_late = data["time_windows"][0][
+            1
+        ]  # depot time window is [0, depot_tw_late]
 
         def time_transit_callback(from_index, to_index):
             from_node = manager.IndexToNode(from_index)
             to_node = manager.IndexToNode(to_index)
-            return data["distance_matrix"][from_node][to_node] + data["service_time"][from_node]
-        time_transit_callback_idx = routing.RegisterTransitCallback(time_transit_callback)
+            return (
+                data["distance_matrix"][from_node][to_node]
+                + data["service_time"][from_node]
+            )
+
+        time_transit_callback_idx = routing.RegisterTransitCallback(
+            time_transit_callback
+        )
         routing.AddDimension(
             time_transit_callback_idx,
             depot_tw_late,  # waiting time upper bound
@@ -84,8 +98,12 @@ def ortools_solve(td: TensorDict, max_runtime: float = 100, log_search: bool = F
     # Set First Solution Heuristic
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.log_search = log_search
-    search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.LOCAL_CHEAPEST_INSERTION
-    search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    search_parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.LOCAL_CHEAPEST_INSERTION
+    )
+    search_parameters.local_search_metaheuristic = (
+        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    )
     search_parameters.time_limit.seconds = max_runtime
 
     # Solve the problem
@@ -93,7 +111,7 @@ def ortools_solve(td: TensorDict, max_runtime: float = 100, log_search: bool = F
     solution = routing.SolveWithParameters(search_parameters)
     duration = time.perf_counter() - start_time
     if solution:
-        #print_solution(manager, data, routing, solution)
+        # print_solution(manager, data, routing, solution)
         action = solution2action(data, manager, routing, solution)
         cost = solution.ObjectiveValue() / ORTOOLS_SCALING_FACTOR
         return action, cost, duration
@@ -104,7 +122,7 @@ def ortools_solve(td: TensorDict, max_runtime: float = 100, log_search: bool = F
 
 def make_ortools_data(td: TensorDict, scaling_factor: int = ORTOOLS_SCALING_FACTOR):
     num_locs = td["locs"].size(-2) - 1  # Exclude depot
-   
+
     data_dict = {}
     data_dict["distance_matrix"] = scale(td["distance_matrix"], scaling_factor).tolist()
 
@@ -119,7 +137,7 @@ def make_ortools_data(td: TensorDict, scaling_factor: int = ORTOOLS_SCALING_FACT
         data_dict["service_time"] = scale(td["service_time"], scaling_factor).tolist()
     data_dict["num_vehicles"] = 1
     data_dict["depot"] = 0
-   
+
     return data_dict
 
 
@@ -159,11 +177,13 @@ def print_solution(manager, data, routing, solution, load_dimension=None):
         while True:
             node = manager.IndexToNode(index)
             actual_load = solution.Value(load_dimension.CumulVar(index))
-            draft_limit = data['draft_limit'][node] if 'draft_limit' in data else float('inf')
-            
+            draft_limit = (
+                data["draft_limit"][node] if "draft_limit" in data else float("inf")
+            )
+
             status = "OK" if actual_load <= draft_limit else "VIOLATION"
             print(f"Node {node}: Load={actual_load} (Limit={draft_limit}) -> {status}")
-            
+
             if routing.IsEnd(index):
                 break
             index = solution.Value(routing.NextVar(index))

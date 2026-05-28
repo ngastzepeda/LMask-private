@@ -1,15 +1,18 @@
 import os
 import sys
+
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(curr_dir, os.pardir))
 sys.path.append(project_root)
-import time
 import subprocess
+import time
+
 import numpy as np
 import torch
 from tensordict.tensordict import TensorDict
 
 from baselines.utils import scale
+
 LKH_SCALING_FACTOR = 1000
 
 
@@ -32,7 +35,9 @@ def lkh_solve(
         start_time = time.perf_counter()
         with open(f"{save_dir}/lkh_log.txt", "a") as f:
             f.write(f"Running LKH for problem {problem_name}\n")
-            subprocess.check_call([executable, paths["parameter_file"]], stdout=f, stderr=f)
+            subprocess.check_call(
+                [executable, paths["parameter_file"]], stdout=f, stderr=f
+            )
             f.write(f"Completed LKH for problem {problem_name}\n")
         duration = time.perf_counter() - start_time
     except subprocess.CalledProcessError as e:
@@ -85,7 +90,12 @@ def _format(name: str, data) -> str:
     return "\n".join(section)
 
 
-def make_vrplib_file(td: TensorDict, problem_type: str, file_path: str, scaling_factor: int = LKH_SCALING_FACTOR):
+def make_vrplib_file(
+    td: TensorDict,
+    problem_type: str,
+    file_path: str,
+    scaling_factor: int = LKH_SCALING_FACTOR,
+):
     num_locs = td["locs"].size(-2)
 
     # Data speicifications
@@ -107,7 +117,9 @@ def make_vrplib_file(td: TensorDict, problem_type: str, file_path: str, scaling_
         sections["DRAFT_LIMIT_SECTION"] = scale(td["draft_limit"], scaling_factor)
 
     problem = "\n".join([f"{k} : {v}" for k, v in specs.items()])
-    problem += "\n" + "\n".join([_format(name, data) for name, data in sections.items()])
+    problem += "\n" + "\n".join([
+        _format(name, data) for name, data in sections.items()
+    ])
     problem += "\n" + "\n".join(["DEPOT_SECTION", "1", "-1", "EOF"])
     with open(file_path, "w") as f:
         f.write(problem)
@@ -124,7 +136,11 @@ def read_tour_file(file_path):
     with open(file_path, "r") as file:
         lines = file.readlines()
 
-    length = int([line for line in lines if line.startswith("COMMENT : Length =")][0].split("=")[1].strip())
+    length = int(
+        [line for line in lines if line.startswith("COMMENT : Length =")][0]
+        .split("=")[1]
+        .strip()
+    )
     tour_start = lines.index("TOUR_SECTION\n") + 1
     tour_end = lines.index("-1\n")
     tour = [int(line.strip()) - 1 for line in lines[tour_start:tour_end]]
@@ -134,10 +150,17 @@ def read_tour_file(file_path):
 
 if __name__ == "__main__":
     from rl4co.data.utils import load_npz_to_tensordict
-    td = load_npz_to_tensordict("./data/random/tsptw/test/tsptw49_test_hard_seed2025.npz")
+
+    td = load_npz_to_tensordict(
+        "./data/random/tsptw/test/tsptw49_test_hard_seed2025.npz"
+    )
     distance_matrix = torch.cdist(td["locs"], td["locs"], p=2)
     distance_matrix.diagonal(dim1=-2, dim2=-1).fill_(0)
     td.update({"distance_matrix": distance_matrix})
     td_test = td[0]
-    tour, length, duration = lkh_solve(td_test, problem_type="TSPTW", problem_name="random1")
-    print(f"After {duration:.2f} seconds, LKH3 finds a tour of length {length:.2f} for the test instance. The tour is \n{tour}")
+    tour, length, duration = lkh_solve(
+        td_test, problem_type="TSPTW", problem_name="random1"
+    )
+    print(
+        f"After {duration:.2f} seconds, LKH3 finds a tour of length {length:.2f} for the test instance. The tour is \n{tour}"
+    )

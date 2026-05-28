@@ -6,13 +6,19 @@ project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.append(project_root)
 
 import time
+
 import torch
 from rl4co.data.utils import load_npz_to_tensordict
-from lmask.utils.data_utils import get_dataloader, extract_info_from_path
+
+from baselines.greedy.tspdl_greedy import TSPDLGreedy, TSPDLLazyMaskGreedy
+from baselines.greedy.tsptw_greedy import TSPTWGreedy, TSPTWLazyMaskGreedy
+from lmask.utils.data_utils import (
+    extract_info_from_path,
+    get_dataloader,
+    load_tsptw_npz,
+)
 from lmask.utils.metric_utils import compute_reward_and_gap_averages
 from lmask.utils.utils import seed_everything
-from baselines.greedy.tsptw_greedy import TSPTWGreedy, TSPTWLazyMaskGreedy
-from baselines.greedy.tspdl_greedy import TSPDLGreedy, TSPDLLazyMaskGreedy
 
 
 def greedy_solver(
@@ -25,9 +31,9 @@ def greedy_solver(
     greedy_type="nearest",
     get_mask=True,
     look_ahead_step=2,
-    num_samples = 256,
-    max_backtrack_steps = 100,
-    env_type = "normal",
+    num_samples=256,
+    max_backtrack_steps=100,
+    env_type="normal",
 ):
     """
     Test a model on a random dataset and evaluate its performance
@@ -47,7 +53,9 @@ def greedy_solver(
         test_dir = os.path.dirname(test_path)
         problem_type, problem_size, hardness = extract_info_from_path(test_path)
         reference_solver = "pyvrp" if problem_type == "TSPTW" else "lkh"
-        ref_sol_path = os.path.join(test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz")
+        ref_sol_path = os.path.join(
+            test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz"
+        )
 
     print(f"Load test dataset from {test_path}")
     print(f"Load reference solutions from {ref_sol_path}")
@@ -56,15 +64,33 @@ def greedy_solver(
 
     if problem_name == "tsptw":
         if env_type == "normal":
-            solver = TSPTWGreedy(greedy_type=greedy_type, get_mask=get_mask, look_ahead_step=look_ahead_step)
+            solver = TSPTWGreedy(
+                greedy_type=greedy_type,
+                get_mask=get_mask,
+                look_ahead_step=look_ahead_step,
+            )
         else:
-            solver = TSPTWLazyMaskGreedy(max_backtrack_steps=max_backtrack_steps, greedy_type=greedy_type, get_mask=get_mask, look_ahead_step=look_ahead_step)
+            solver = TSPTWLazyMaskGreedy(
+                max_backtrack_steps=max_backtrack_steps,
+                greedy_type=greedy_type,
+                get_mask=get_mask,
+                look_ahead_step=look_ahead_step,
+            )
 
     elif problem_name == "tspdl":
         if env_type == "normal":
-            solver = TSPDLGreedy(greedy_type=greedy_type, get_mask=get_mask, look_ahead_step=look_ahead_step)
+            solver = TSPDLGreedy(
+                greedy_type=greedy_type,
+                get_mask=get_mask,
+                look_ahead_step=look_ahead_step,
+            )
         else:
-            solver = TSPDLLazyMaskGreedy(max_backtrack_steps=max_backtrack_steps, greedy_type=greedy_type, get_mask=get_mask, look_ahead_step=look_ahead_step)
+            solver = TSPDLLazyMaskGreedy(
+                max_backtrack_steps=max_backtrack_steps,
+                greedy_type=greedy_type,
+                get_mask=get_mask,
+                look_ahead_step=look_ahead_step,
+            )
     else:
         raise ValueError(f"Problem {problem_name} is not supported.")
 
@@ -73,11 +99,13 @@ def greedy_solver(
     seed_everything(seed)
 
     # Load the test data and the reference solutions
-    td = load_npz_to_tensordict(test_path)
+    if problem_name == "tsptw":
+        td = load_tsptw_npz(test_path)
+    else:
+        td = load_npz_to_tensordict(test_path)
     dataloader = get_dataloader(td, batch_size=batch_size)
     sol = load_npz_to_tensordict(ref_sol_path)
     cost_bks = sol["costs"].to(device)
-    
 
     # ----------------- Inference -----------------#
     print("Start inference!")
@@ -109,24 +137,55 @@ def greedy_solver(
     if verbose:
         print("=" * 50)
         print(f"Total Inference Time: {inference_time:.2f} s")
-        print(f"Instance feasibility rate: {ins_feas_rate:.3%} | Solution feasibility rate: {sol_feas_rate:.3%}")
+        print(
+            f"Instance feasibility rate: {ins_feas_rate:.3%} | Solution feasibility rate: {sol_feas_rate:.3%}"
+        )
         print(f"Cost: {-avg_reward:.3f} | Gap: {avg_gap:.3%}")
 
-    return {"inference_time": inference_time, "ins_feas_rate": ins_feas_rate, "sol_feas_rate": sol_feas_rate, "avg_reward": avg_reward, "avg_gap": avg_gap}
+    return {
+        "inference_time": inference_time,
+        "ins_feas_rate": ins_feas_rate,
+        "sol_feas_rate": sol_feas_rate,
+        "avg_reward": avg_reward,
+        "avg_gap": avg_gap,
+    }
 
 
 if __name__ == "__main__":
-    import pandas as pd
+    import argparse
     import os
     from pathlib import Path
-    import argparse
+
+    import pandas as pd
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_type", type=str, default="lazymask", choices=["normal", "lazymask"], help="Type of environment to use")
-    parser.add_argument("--max_backtrack_steps", type=int, default=200, help="Maximum backtrack steps for lazy mask environment")
-    parser.add_argument("--look_ahead_step", type=int, default=1, help="Look ahead steps for greedy policy")
-    parser.add_argument("--sample_size", type=int, default=128, help="Number of samples for greedy policy")
+    parser.add_argument(
+        "--env_type",
+        type=str,
+        default="lazymask",
+        choices=["normal", "lazymask"],
+        help="Type of environment to use",
+    )
+    parser.add_argument(
+        "--max_backtrack_steps",
+        type=int,
+        default=200,
+        help="Maximum backtrack steps for lazy mask environment",
+    )
+    parser.add_argument(
+        "--look_ahead_step",
+        type=int,
+        default=1,
+        help="Look ahead steps for greedy policy",
+    )
+    parser.add_argument(
+        "--sample_size",
+        type=int,
+        default=128,
+        help="Number of samples for greedy policy",
+    )
     args = parser.parse_args()
-    
+
     # Set default parameters
     data_dir = "data/random"
     look_ahead_step = args.look_ahead_step
@@ -154,30 +213,46 @@ if __name__ == "__main__":
         for problem_size in problem_sizes:
             for hardness in hardness_levels:
                 for greedy_type in greedy_types:
-                    print(f"\n{'='*80}")
-                    print(f"Testing: Problem={problem}, Size={problem_size}, Hardness={hardness}, Greedy Type={greedy_type}")
-                    print(f"{'='*80}")
+                    print(f"\n{'=' * 80}")
+                    print(
+                        f"Testing: Problem={problem}, Size={problem_size}, Hardness={hardness}, Greedy Type={greedy_type}"
+                    )
+                    print(f"{'=' * 80}")
 
                     # Construct test path and reference solution path
                     test_path = f"{data_dir}/{problem}/test/{problem}{problem_size}_test_{hardness}_seed{seed}.npz"
                     test_dir = os.path.dirname(test_path)
                     reference_solver = "pyvrp" if problem == "tsptw" else "lkh"
-                    ref_sol_path = os.path.join(test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz")
+                    ref_sol_path = os.path.join(
+                        test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz"
+                    )
 
                     # Check if test file exists
                     if not os.path.exists(test_path):
-                        print(f"Warning: Test file {test_path} does not exist, skipping...")
+                        print(
+                            f"Warning: Test file {test_path} does not exist, skipping..."
+                        )
                         continue
 
                     if not os.path.exists(ref_sol_path):
-                        print(f"Warning: Reference solution file {ref_sol_path} does not exist, skipping...")
+                        print(
+                            f"Warning: Reference solution file {ref_sol_path} does not exist, skipping..."
+                        )
                         continue
                     batch_size = 1024 if problem_size == 50 else 512
                     # Run the greedy solver
                     result = greedy_solver(
-                        problem_name=problem, test_path=test_path, ref_sol_path=ref_sol_path, batch_size=batch_size, greedy_type=greedy_type, look_ahead_step=look_ahead_step, seed=seed, verbose=True, num_samples = sample_size, 
-                        env_type=args.env_type, max_backtrack_steps=args.max_backtrack_steps
-                        
+                        problem_name=problem,
+                        test_path=test_path,
+                        ref_sol_path=ref_sol_path,
+                        batch_size=batch_size,
+                        greedy_type=greedy_type,
+                        look_ahead_step=look_ahead_step,
+                        seed=seed,
+                        verbose=True,
+                        num_samples=sample_size,
+                        env_type=args.env_type,
+                        max_backtrack_steps=args.max_backtrack_steps,
                     )
 
                     # Format the results with percentage symbols using f-strings

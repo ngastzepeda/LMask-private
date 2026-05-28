@@ -1,6 +1,8 @@
-import time
 import os
 import sys
+import time
+
+import numpy as np
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
@@ -10,15 +12,23 @@ import warnings
 
 warnings.filterwarnings("ignore", message="Unused keyword arguments:.*")
 import logging
+
 import torch
+from loguru import logger
 from rl4co.data.utils import load_npz_to_tensordict
 
-from lmask.envs import get_env
 import lmask.models.policy
-from lmask.utils.data_utils import get_dataloader, extract_info_from_path
-from lmask.utils.metric_utils import compute_reward_and_gap_averages
+from lmask.envs import get_env
+from lmask.utils.data_utils import (
+    extract_info_from_path,
+    get_dataloader,
+    load_tsptw_npz,
+)
+from lmask.utils.metric_utils import (
+    compute_reward_and_gap_averages,
+    compute_valid_average,
+)
 from lmask.utils.utils import infer_default_cofigs, seed_everything
-
 
 logging.getLogger("rl4co").setLevel(logging.ERROR)
 
@@ -40,7 +50,7 @@ def test_model_on_random_dataset(
     ref_sol_path=None,
     batch_size=2500,
     seed=2025,
-    use_reld = False,
+    use_reld=False,
     **kwargs,
 ):
     """
@@ -56,22 +66,33 @@ def test_model_on_random_dataset(
     Returns:
         tuple: (instance feasibility rate, augmented gap)
     """
-    # If ref_sol_path is None, construct it based on problem type
+    # If ref_sol_path is None, try to construct it based on problem type
     if ref_sol_path is None:
-        test_dir = os.path.dirname(test_path)
-        problem_type, problem_size, hardness = extract_info_from_path(test_path)
-        reference_solver = "pyvrp" if problem_type == "TSPTW" else "lkh"
-        ref_sol_path = os.path.join(test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz")
+        try:
+            test_dir = os.path.dirname(test_path)
+            problem_type, problem_size, hardness = extract_info_from_path(test_path)
+            reference_solver = "pyvrp" if problem_type == "TSPTW" else "lkh"
+            ref_sol_path = os.path.join(
+                test_dir, f"{reference_solver}_{problem_size}_{hardness}.npz"
+            )
+        except Exception as exc:
+            logger.error(f"No reference solutions inferred: {exc}")
+            ref_sol_path = None
 
-    print(f"Load test dataset from {test_path}")
-    print(f"Load reference solutions from {ref_sol_path}")
-    print(f"Load policy from {checkpoint}")
-    print(f"Use environment {env_name}")
+    logger.info(f"Load test dataset from {test_path}")
+    if ref_sol_path:
+        logger.info(f"Load reference solutions from {ref_sol_path}")
+    else:
+        logger.warn("No reference solutions provided; gap will be skipped")
+    logger.info(f"Load policy from {checkpoint}")
+    logger.info(f"Use environment {env_name}")
     # ----------------- Setup -----------------#
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed_everything(seed)
 
-    rollout_kwargs = {k: kwargs.pop(k) for k in ["decode_type", "num_samples"] if k in kwargs}
+    rollout_kwargs = {
+        k: kwargs.pop(k) for k in ["decode_type", "num_samples"] if k in kwargs
+    }
 
     # Instantiate the environment
     env = get_env(env_name, **kwargs)
@@ -83,13 +104,23 @@ def test_model_on_random_dataset(
     policy.to(device).eval()
 
     # Load the test data and the reference solutions
-    td = load_npz_to_tensordict(test_path)
+    if "tspdl" in env_name.lower():
+        td = load_npz_to_tensordict(test_path)
+    else:
+        td = load_tsptw_npz(test_path)
     dataloader = get_dataloader(td, batch_size=batch_size)
-    sol = load_npz_to_tensordict(ref_sol_path)
-    cost_bks = sol["costs"].to(device)
+    cost_bks = None
+    if ref_sol_path and os.path.exists(ref_sol_path):
+        sol = np.load(ref_sol_path)
+        if "costs" in sol:
+            cost_bks = torch.as_tensor(sol["costs"], dtype=torch.float32, device=device)
+        else:
+            logger.warn("Reference file has no costs; gap will be skipped")
+    elif ref_sol_path:
+        logger.warn("Reference file not found; gap will be skipped")
 
     # ----------------- Inference -----------------#
-    print("Start inference!")
+    logger.info("Start inference!")
     start = time.time()
     out_list = []
     for batch in dataloader:
@@ -112,32 +143,70 @@ def test_model_on_random_dataset(
     for dim in range(no_aug_masked.dim() - 1, 0, -1):
         no_aug_masked = no_aug_masked.max(dim=dim)[0]
 
-    avg_reward, avg_gap = compute_reward_and_gap_averages(masked_reward, cost_bks)
-    avg_no_aug_reward, avg_no_aug_gap = compute_reward_and_gap_averages(no_aug_masked, cost_bks)
+    if cost_bks is not None:
+        avg_reward, avg_gap = compute_reward_and_gap_averages(masked_reward, cost_bks)
+        avg_no_aug_reward, avg_no_aug_gap = compute_reward_and_gap_averages(
+            no_aug_masked, cost_bks
+        )
+    else:
+        avg_reward = compute_valid_average(masked_reward)
+        avg_no_aug_reward = compute_valid_average(no_aug_masked)
+        avg_gap = None
+        avg_no_aug_gap = None
 
     if verbose:
-        print("=" * 50)
-        print(f"Total Inference Time: {inference_time:.2f} s")
-        print(f"Instance feasibility rate: {ins_feas_rate:.3%} | Solution feasibility rate: {sol_feas_rate:.3%}")
-        print(f"No augment| Cost: {-avg_no_aug_reward:.3f} | Gap: {avg_no_aug_gap:.3%}")
-        print(f"Augmented | Cost: {-avg_reward:.3f} | Gap: {avg_gap:.3%}")
+        logger.info("=" * 50)
+        logger.info(f"Total Inference Time: {inference_time:.2f} s")
+        logger.info(
+            "Instance feasibility rate: "
+            f"{ins_feas_rate:.3%} | Solution feasibility rate: {sol_feas_rate:.3%}"
+        )
+        if avg_no_aug_gap is None:
+            logger.info(f"No augment| Cost: {-avg_no_aug_reward:.3f} | Gap: N/A")
+            logger.info(f"Augmented | Cost: {-avg_reward:.3f} | Gap: N/A")
+        else:
+            logger.info(
+                "No augment| Cost: "
+                f"{-avg_no_aug_reward:.3f} | Gap: {avg_no_aug_gap:.3%}"
+            )
+            logger.info(f"Augmented | Cost: {-avg_reward:.3f} | Gap: {avg_gap:.3%}")
 
-    return {"inference_time": inference_time, "ins_feas_rate": ins_feas_rate, "sol_feas_rate": sol_feas_rate, "avg_reward": avg_reward, "avg_gap": avg_gap}
+    return {
+        "inference_time": inference_time,
+        "ins_feas_rate": ins_feas_rate,
+        "sol_feas_rate": sol_feas_rate,
+        "avg_reward": avg_reward,
+        "avg_gap": avg_gap,
+    }
 
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=DeprecationWarning)
-    warnings.filterwarnings("ignore", message="Attribute.*is an instance of `nn.Module`")
+    warnings.filterwarnings(
+        "ignore", message="Attribute.*is an instance of `nn.Module`"
+    )
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=2025)
     parser.add_argument("--batch_size", type=int, default=2500)
 
     # Parameters fort test
-    parser.add_argument("--problem", type=str, choices=["tspdl", "tsptw"], default="tsptw", help="Problem type")
+    parser.add_argument(
+        "--problem",
+        type=str,
+        choices=["tspdl", "tsptw"],
+        default="tsptw",
+        help="Problem type",
+    )
     parser.add_argument("--problem_size", type=int, default=50, help="Problem size")
-    parser.add_argument("--hardness", type=str, choices=["easy", "medium", "hard"], default="hard", help="Problem difficulty")
+    parser.add_argument(
+        "--hardness",
+        type=str,
+        choices=["easy", "medium", "hard"],
+        default="hard",
+        help="Problem difficulty",
+    )
 
     # Optional test parameters (can be inferred)
     parser.add_argument("--env_name", type=str, help="Environment name")
@@ -147,16 +216,31 @@ if __name__ == "__main__":
     parser.add_argument("--ref_sol_path", type=str, help="Path to reference solutions")
 
     # Algorithm parameters
-    parser.add_argument("--lookahead_step", "-L", type=int, choices=[1, 2, 3], default=2, help="Number of lookahead steps when getting inital masks")
+    parser.add_argument(
+        "--lookahead_step",
+        "-L",
+        type=int,
+        choices=[1, 2, 3],
+        default=2,
+        help="Number of lookahead steps when getting inital masks",
+    )
     parser.add_argument("--max_backtrack_steps", "-R", type=int, default=100)
-    parser.add_argument("--decode_type", type=str, default="greedy", choices=["greedy", "sampling"], help="Decoding strategy")
+    parser.add_argument(
+        "--decode_type",
+        type=str,
+        default="greedy",
+        choices=["greedy", "sampling"],
+        help="Decoding strategy",
+    )
     parser.add_argument("--num_samples", "-N", type=int, default=1)
 
     args = parser.parse_args()
 
     # Infer parameters if needed
     if args.problem and args.problem_size and args.hardness:
-        inferred = infer_default_cofigs(args.problem, args.problem_size, args.hardness, args.seed)
+        inferred = infer_default_cofigs(
+            args.problem, args.problem_size, args.hardness, args.seed
+        )
 
         # Only use inferred values for parameters that weren't explicitly provided
         if not args.policy_name:
@@ -175,6 +259,7 @@ if __name__ == "__main__":
         checkpoint=args.checkpoint,
         batch_size=args.batch_size,
         test_path=args.test_path,
+        ref_sol_path=args.ref_sol_path,
         verbose=True,
         max_backtrack_steps=args.max_backtrack_steps,
         lookahead_step=args.lookahead_step,

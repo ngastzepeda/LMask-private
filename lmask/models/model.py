@@ -1,11 +1,13 @@
 from typing import Any, Union
+
 import torch.nn as nn
+from lightning.pytorch.utilities import grad_norm
 from rl4co.data.transforms import StateAugmentation
 from rl4co.envs.common.base import RL4COEnvBase
 from rl4co.models import REINFORCE
 from rl4co.utils.ops import unbatchify
-from lightning.pytorch.utilities import grad_norm
 
+from lmask.utils.data_utils import get_dataloader, load_tsptw_npz
 from lmask.utils.metric_utils import get_filtered_max
 
 
@@ -26,11 +28,17 @@ class LMaskPenaltyModel(REINFORCE):
         entropy_coef: float = 0.0,
         round_eps: float = 1e-5,
         penalty_type: str = "combined_penalty",
+        train_file: str = None,
+        val_file: str = None,
+        test_file: str = None,
+        data_normalize: str = "auto",
         **kwargs,
     ):
         self.save_hyperparameters(logger=False)
         self.save_hyperparameters(ignore=["env", "policy"])
-        assert baseline == "shared", "Only shared baseline is supported for LMaskPenaltyModel"
+        assert baseline == "shared", (
+            "Only shared baseline is supported for LMaskPenaltyModel"
+        )
         super(LMaskPenaltyModel, self).__init__(env, policy, baseline, **kwargs)
         self.num_samples = num_samples
         self.num_augment = num_augment
@@ -47,8 +55,52 @@ class LMaskPenaltyModel(REINFORCE):
         self.entropy_coef = entropy_coef
         self.round_eps = round_eps
         self.penalty_type = penalty_type
+        self.train_file = train_file
+        self.val_file = val_file
+        self.test_file = test_file
+        self.data_normalize = data_normalize
 
-    def shared_step(self, batch: Any, batch_idx: int, phase: str, dataloader_idx: int = None):
+    def _get_batch_size(self, phase: str) -> int:
+        if phase == "train":
+            return getattr(self, "batch_size", self.hparams.get("batch_size", 1))
+        return getattr(
+            self,
+            "val_batch_size",
+            getattr(self, "batch_size", self.hparams.get("batch_size", 1)),
+        )
+
+    def _load_npz(self, file_path: str) -> "TensorDict":
+        if file_path is None:
+            return None
+        return load_tsptw_npz(file_path, normalize=self.data_normalize)
+
+    def train_dataloader(self):
+        if self.train_file:
+            td = self._load_npz(self.train_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("train"), shuffle=True
+            )
+        return super().train_dataloader()
+
+    def val_dataloader(self):
+        if self.val_file:
+            td = self._load_npz(self.val_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("val"), shuffle=False
+            )
+        return super().val_dataloader()
+
+    def test_dataloader(self):
+        if self.test_file:
+            td = self._load_npz(self.test_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("test"), shuffle=False
+            )
+        return super().test_dataloader()
+
+    def shared_step(
+        self, batch: Any, batch_idx: int, phase: str, dataloader_idx: int = None
+    ):
         td = self.env.reset(batch)
         n_aug, n_sample = self.num_augment, self.num_samples
         n_sample = td["locs"].size(-2) if n_sample is None else n_sample
@@ -61,8 +113,10 @@ class LMaskPenaltyModel(REINFORCE):
             td = self.augment(td)
 
         # Evaluate policy
-        
-        out = self.policy(td, self.env, phase=phase, num_samples=n_sample, return_entropy=True)
+
+        out = self.policy(
+            td, self.env, phase=phase, num_samples=n_sample, return_entropy=True
+        )
 
         # Unbatchify reward to [batch_size, num_samples](during training phase) or [batch_size, num_augment, num_samples].
         reward_td = unbatchify(out["reward"], (n_aug, n_sample))
@@ -71,7 +125,11 @@ class LMaskPenaltyModel(REINFORCE):
         violated_node_count = reward_td["violated_node_count"]
 
         if self.penalty_type == "combined_penalty":
-            penalized_reward = reward - self.rho_c * total_constraint_violation - self.rho_n * violated_node_count  # [B, S]
+            penalized_reward = (
+                reward
+                - self.rho_c * total_constraint_violation
+                - self.rho_n * violated_node_count
+            )  # [B, S]
         elif self.penalty_type == "constraint_viol_penalty":
             penalized_reward = reward - self.rho_c * total_constraint_violation
         elif self.penalty_type == "viol_node_count_penalty":
@@ -79,16 +137,14 @@ class LMaskPenaltyModel(REINFORCE):
 
         sol_feas = total_constraint_violation < self.round_eps  # [B, S] or [B, A, S]
         ins_feas = sol_feas.any(dim=tuple(range(1, sol_feas.dim())))  # [B]
-        out.update(
-            {
-                "reward": reward.mean().item(),
-                "violated_node_count": reward_td["violated_node_count"],
-                "total_constraint_violation": reward_td["total_constraint_violation"],
-                "penalized_reward": penalized_reward,
-                "ins_feas_rate": ins_feas.float().mean().item() * 100,
-                "sol_feas_rate": sol_feas.float().mean().item() * 100,
-            }
-        )
+        out.update({
+            "reward": reward.mean().item(),
+            "violated_node_count": reward_td["violated_node_count"],
+            "total_constraint_violation": reward_td["total_constraint_violation"],
+            "penalized_reward": penalized_reward,
+            "ins_feas_rate": ins_feas.float().mean().item() * 100,
+            "sol_feas_rate": sol_feas.float().mean().item() * 100,
+        })
 
         # Training phase
         if phase == "train":
@@ -96,7 +152,10 @@ class LMaskPenaltyModel(REINFORCE):
             log_likelihood = unbatchify(out["log_likelihood"], n_sample)
             entropy = unbatchify(out["entropy"], n_sample)
             advantage = penalized_reward - penalized_reward.mean(dim=-1, keepdim=True)
-            loss = -(log_likelihood * advantage).mean() - self.entropy_coef * entropy.mean()
+            loss = (
+                -(log_likelihood * advantage).mean()
+                - self.entropy_coef * entropy.mean()
+            )
             out.update({"loss": loss})
             out.update({"max_reward": get_filtered_max(reward, sol_feas)})
 
@@ -106,7 +165,9 @@ class LMaskPenaltyModel(REINFORCE):
                 # Calculate max_reward (no augmentation or first augmentation slice)
                 no_aug_reward = reward if n_aug == 0 else reward[:, 0]
                 no_aug_sol_feas = sol_feas if n_aug == 0 else sol_feas[:, 0]
-                out.update({"max_reward": get_filtered_max(no_aug_reward, no_aug_sol_feas)})
+                out.update({
+                    "max_reward": get_filtered_max(no_aug_reward, no_aug_sol_feas)
+                })
 
                 # Calculate max_aug_reward (using all augmentations)
             if n_aug > 1:
@@ -142,12 +203,20 @@ class LMaskBacktrackingPenaltyModel(REINFORCE):
         penalty_type: str = "combined_penalty",
         switch_mode: bool = False,
         switch_epoch: int = 100,
+        train_file: str = None,
+        val_file: str = None,
+        test_file: str = None,
+        data_normalize: str = "auto",
         **kwargs,
     ):
         self.save_hyperparameters(logger=False)
         self.save_hyperparameters(ignore=["env", "policy"])
-        assert baseline == "shared", "Only shared baseline is supported for LMaskPenaltyModel"
-        super(LMaskBacktrackingPenaltyModel, self).__init__(env, policy, baseline, **kwargs)
+        assert baseline == "shared", (
+            "Only shared baseline is supported for LMaskPenaltyModel"
+        )
+        super(LMaskBacktrackingPenaltyModel, self).__init__(
+            env, policy, baseline, **kwargs
+        )
         self.num_samples = num_samples
         self.num_augment = num_augment
         if self.num_augment > 1:
@@ -165,30 +234,87 @@ class LMaskBacktrackingPenaltyModel(REINFORCE):
         self.penalty_type = penalty_type
         self.switch_mode = switch_mode
         self.switch_epoch = switch_epoch
+        self.train_file = train_file
+        self.val_file = val_file
+        self.test_file = test_file
+        self.data_normalize = data_normalize
 
-    def shared_step(self, batch: Any, batch_idx: int, phase: str, dataloader_idx: int = None):
+    def _get_batch_size(self, phase: str) -> int:
+        if phase == "train":
+            return getattr(self, "batch_size", self.hparams.get("batch_size", 1))
+        return getattr(
+            self,
+            "val_batch_size",
+            getattr(self, "batch_size", self.hparams.get("batch_size", 1)),
+        )
+
+    def _load_npz(self, file_path: str) -> "TensorDict":
+        if file_path is None:
+            return None
+        return load_tsptw_npz(file_path, normalize=self.data_normalize)
+
+    def train_dataloader(self):
+        if self.train_file:
+            td = self._load_npz(self.train_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("train"), shuffle=True
+            )
+        return super().train_dataloader()
+
+    def val_dataloader(self):
+        if self.val_file:
+            td = self._load_npz(self.val_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("val"), shuffle=False
+            )
+        return super().val_dataloader()
+
+    def test_dataloader(self):
+        if self.test_file:
+            td = self._load_npz(self.test_file)
+            return get_dataloader(
+                td, batch_size=self._get_batch_size("test"), shuffle=False
+            )
+        return super().test_dataloader()
+
+    def shared_step(
+        self, batch: Any, batch_idx: int, phase: str, dataloader_idx: int = None
+    ):
         self.env.phase = phase
         td = self.env.reset(batch)
 
         if phase == "train":
             n_aug = 0
-            n_sample = td["locs"].size(-2) if self.num_samples is None else self.num_samples
+            n_sample = (
+                td["locs"].size(-2) if self.num_samples is None else self.num_samples
+            )
             decode_type = "sampling"
         else:
             n_aug, n_sample = self.num_augment, 0
             decode_type = "greedy"
-        
+
         # out tensordict has been internally unbatchified to [B, A, S] or [B, S]
         # To record scalar values, we need to convert it to a dict
-        out = self.env.rollout(td, self.policy, num_samples=n_sample, num_augment=n_aug, decode_type=decode_type, device=td.device) 
-        out = out.to_dict()  
+        out = self.env.rollout(
+            td,
+            self.policy,
+            num_samples=n_sample,
+            num_augment=n_aug,
+            decode_type=decode_type,
+            device=td.device,
+        )
+        out = out.to_dict()
 
         reward = out["reward"]
         total_constraint_violation = out["total_constraint_violation"]
         violated_node_count = out["violated_node_count"]
 
         if self.penalty_type == "combined_penalty":
-            penalized_reward = reward - self.rho_c * total_constraint_violation - self.rho_n * violated_node_count  # [B, S]
+            penalized_reward = (
+                reward
+                - self.rho_c * total_constraint_violation
+                - self.rho_n * violated_node_count
+            )  # [B, S]
         elif self.penalty_type == "constraint_viol_penalty":
             penalized_reward = reward - self.rho_c * total_constraint_violation
         elif self.penalty_type == "viol_node_count_penalty":
@@ -196,22 +322,23 @@ class LMaskBacktrackingPenaltyModel(REINFORCE):
 
         sol_feas = total_constraint_violation < self.round_eps  # [B, S] or [B, A, S]
         ins_feas = sol_feas.any(dim=tuple(range(1, sol_feas.dim())))  # [B]
-        
-        out.update(
-            {
-                "reward": reward,
-                "penalized_reward": penalized_reward,
-                "ins_feas_rate": ins_feas.float() * 100,
-                "sol_feas_rate": sol_feas.float() * 100,
-            }
-        )
+
+        out.update({
+            "reward": reward,
+            "penalized_reward": penalized_reward,
+            "ins_feas_rate": ins_feas.float() * 100,
+            "sol_feas_rate": sol_feas.float() * 100,
+        })
 
         # Training phase
         if phase == "train":
             assert n_sample > 1, "num_samples must be > 1 during training"
             log_likelihood, entropy = out["log_likelihood"], out["entropy"]
             advantage = penalized_reward - penalized_reward.mean(dim=-1, keepdim=True)
-            loss = -(log_likelihood * advantage).mean() - self.entropy_coef * entropy.mean()
+            loss = (
+                -(log_likelihood * advantage).mean()
+                - self.entropy_coef * entropy.mean()
+            )
             out.update({"loss": loss})
             out.update({"max_reward": get_filtered_max(reward, sol_feas)})
 
@@ -221,11 +348,10 @@ class LMaskBacktrackingPenaltyModel(REINFORCE):
 
         metrics = self.log_metrics(out, phase, dataloader_idx=dataloader_idx)
         return {"loss": out.get("loss", None), **metrics}
-    
+
     # def on_train_epoch_end(self):
     #     if self.switch_mode and self.current_epoch == self.switch_epoch:
     #         self.env.disable_backtracking = False
     #         self.env.max_backtracking_steps = 100
     #         self.rho_c = 0.5
     #         self.rho_n = 0.5
-            

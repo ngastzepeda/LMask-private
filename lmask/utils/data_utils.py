@@ -1,17 +1,19 @@
 import os
+
+import numpy as np
 import torch
+from loguru import logger
+from rl4co.data.dataset import TensorDictDataset
 from tensordict.tensordict import TensorDict
 from torch.utils.data import DataLoader
-from rl4co.data.dataset import TensorDictDataset
 
 
-def get_dataloader(td, batch_size=4):
-    """Get a dataloader from a TensorDictDataset"""
-    # Set up the dataloader
+def get_dataloader(td, batch_size=4, shuffle=False):
+    """Get a dataloader from a TensorDictDataset."""
     dataloader = DataLoader(
         TensorDictDataset(td.clone()),
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=shuffle,
         num_workers=0,
         collate_fn=TensorDictDataset.collate_fn,
     )
@@ -42,6 +44,119 @@ def extract_info_from_path(file_path):
     return problem_type, problem_size, hardness_level
 
 
+def resolve_data_path(file_path: str) -> str:
+    """Resolve a path relative to the repo root if needed."""
+    if file_path is None:
+        return None
+    if os.path.isabs(file_path):
+        return file_path
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
+    )
+    candidate = os.path.join(repo_root, file_path)
+    return candidate if os.path.exists(candidate) else os.path.abspath(file_path)
+
+
+def _get_npz_key(data, keys):
+    for key in keys:
+        if key in data:
+            return key
+    return None
+
+
+def load_tsptw_npz(file_path: str, normalize: str = "auto") -> TensorDict:
+    """
+    Load a TSPTW npz file with flexible schema.
+
+    Expected keys:
+    - locs
+    - service_time or service_times
+    - time_windows
+
+    Extra keys are ignored. If normalize="auto", locs/time_windows are scaled when
+    locs are not already in ~[0, 1] and max_loc is available in the file. The
+    n_vehicles key is required and must be 1 for TSPTW.
+    """
+    resolved_path = resolve_data_path(file_path)
+    data = np.load(resolved_path)
+
+    n_vehicles_tensor = None
+    if "n_vehicles" in data:
+        n_vehicles_raw = np.asarray(data["n_vehicles"])
+        if not np.all(n_vehicles_raw == 1):
+            logger.error(f"Expected n_vehicles == 1 for TSPTW, got {n_vehicles_raw}")
+            raise ValueError("Invalid n_vehicles value for TSPTW")
+        n_vehicles_tensor = torch.as_tensor(n_vehicles_raw, dtype=torch.int64)
+    else:
+        logger.error("n_vehicles is required for TSPTW")
+        raise KeyError("Missing n_vehicles in npz file")
+
+    service_key = _get_npz_key(data, ["service_time", "service_times"])
+    if service_key is None:
+        raise KeyError("Missing service_time/service_times in npz file")
+
+    locs = torch.as_tensor(data["locs"], dtype=torch.float32)
+    service_time = torch.as_tensor(data[service_key], dtype=torch.float32)
+    time_windows = torch.as_tensor(data["time_windows"], dtype=torch.float32)
+
+    # Ensure batch dimension exists
+    if locs.dim() == 2:
+        locs = locs.unsqueeze(0)
+    if service_time.dim() == 1:
+        service_time = service_time.unsqueeze(0)
+    if time_windows.dim() == 2:
+        time_windows = time_windows.unsqueeze(0)
+
+    # Squeeze trailing singleton dimensions if present
+    if service_time.dim() == 3 and service_time.size(-1) == 1:
+        service_time = service_time.squeeze(-1)
+
+    if n_vehicles_tensor.dim() == 0:
+        n_vehicles_tensor = n_vehicles_tensor.expand(locs.size(0)).clone()
+    if n_vehicles_tensor.numel() != locs.size(0):
+        logger.error(
+            "n_vehicles length does not match batch size: "
+            f"{n_vehicles_tensor.numel()} vs {locs.size(0)}"
+        )
+        raise ValueError("Invalid n_vehicles length")
+
+    do_normalize = False
+    if normalize is True:
+        do_normalize = True
+    elif normalize == "auto":
+        do_normalize = float(locs.max()) > 1.5
+
+    if do_normalize:
+        scale = None
+        max_loc_key = _get_npz_key(data, ["max_loc"])
+        if max_loc_key is not None:
+            scale = float(np.asarray(data[max_loc_key]).max())
+        else:
+            max_loc_path = os.path.join(os.path.dirname(resolved_path), "max_loc.npy")
+            if os.path.exists(max_loc_path):
+                scale = float(np.asarray(np.load(max_loc_path)).max())
+
+        if scale and scale > 0:
+            locs = locs / scale
+            time_windows = time_windows / scale
+            service_time = service_time / scale
+        else:
+            logger.warn(
+                "locs appear unnormalized but max_loc not found; skipping normalization."
+            )
+
+    td = TensorDict(
+        {
+            "locs": locs,
+            "service_time": service_time,
+            "time_windows": time_windows,
+            "n_vehicles": n_vehicles_tensor,
+        },
+        batch_size=[locs.size(0)],
+    )
+    return td
+
+
 def read_tsptw_instance(file_path: str) -> dict:
     """
     Read TSPTW instance in the da Silva-Urrutia format, return a dictionary containing the following fields:
@@ -66,8 +181,12 @@ def read_tsptw_instance(file_path: str) -> dict:
     td = TensorDict(
         {
             "locs": torch.tensor(locs, dtype=torch.float32).unsqueeze(0),
-            "service_time": torch.tensor(service_time, dtype=torch.float32).unsqueeze(0),
-            "time_windows": torch.tensor(time_windows, dtype=torch.float32).unsqueeze(0),
+            "service_time": torch.tensor(service_time, dtype=torch.float32).unsqueeze(
+                0
+            ),
+            "time_windows": torch.tensor(time_windows, dtype=torch.float32).unsqueeze(
+                0
+            ),
         },
         batch_size=[1],
     )
@@ -86,7 +205,7 @@ def read_dumas_distance_matrix(file_path):
     """
     import torch
 
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         lines = f.readlines()
 
     n_nodes = int(lines[0].strip())
