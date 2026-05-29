@@ -8,7 +8,7 @@
 #SBATCH -J "lmask"
 #SBATCH --cpus-per-task=2
 #SBATCH --tasks-per-node=1
-#SBATCH --mem-per-cpu=4GB
+#SBATCH --mem-per-cpu=2GB
 #SBATCH -p gpu
 #SBATCH --gres=gpu:a100:1
 #SBATCH -A hpc-prf-winf4gpu
