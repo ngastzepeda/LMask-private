@@ -15,7 +15,6 @@ pyrootutils.setup_root(__file__, indicator= ".gitignore", pythonpath=True)
 
 
 log = utils.get_pylogger(__name__)
-os.environ["SWANLAB_API_KEY"] = "3aTnn5CrPjOvL4QW2wVLi"
 
 @utils.task_wrapper
 def run(cfg: DictConfig) -> Tuple[dict, dict]:
