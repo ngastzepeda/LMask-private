@@ -42,7 +42,18 @@ fi
 experiment="$1"
 shift
 
+# Build the wandb run name from the experiment path:
+#   feasible/<group>/<cfg>  ->  <group>_<cfg with "amai" stripped>
+#   e.g. feasible/amai/n100_amai_mw -> amai_n100_mw ; feasible/lmask/n20_amai -> lmask_n20
+group="$(basename "$(dirname "$experiment")")"
+cfg="$(basename "$experiment")"
+cleaned="${cfg//amai/}"      # drop the redundant "amai" token
+cleaned="${cleaned//__/_}"   # collapse any resulting double underscore
+cleaned="${cleaned#_}"       # trim leading underscore
+cleaned="${cleaned%_}"       # trim trailing underscore
+run_name="${group}_${cleaned}"
+
 mkdir -p "$current_folder/out"
 
 # Start the cluster job
-python "$current_folder/run.py" experiment="$experiment" "$@"
+python "$current_folder/run.py" experiment="$experiment" logger.wandb.name="$run_name" "$@"
