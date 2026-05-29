@@ -5,11 +5,7 @@ defaults:
 
 env:
   _target_: lmask.envs.TSPTWEnv
-  look_ahead_step: 2
-  generator_params:
-    num_loc: 50
-    hardness: medium
-  val_file: [feasible/npz/n50_amai/val_1k.npz]
+  lookahead_step: 2
 
 model:
   _target_: lmask.models.model.LMaskPenaltyModel

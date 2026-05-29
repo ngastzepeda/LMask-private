@@ -5,7 +5,7 @@ defaults:
 
 env:
   _target_: lmask.envs.TSPTWEnv
-  look_ahead_step: 2
+  lookahead_step: 2
 
 model:
   _target_: lmask.models.model.LMaskPenaltyModel
