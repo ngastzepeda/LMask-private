@@ -23,7 +23,7 @@ export OMP_NUM_THREADS=1
 current_folder="$SLURM_SUBMIT_DIR"
 cd "$current_folder" || { echo "Error: Could not change to $current_folder"; exit 1; }
 
-module load lang/Python/3.10.4-GCCcore-11.3.0
+module load lang/Python/3.12.3-GCCcore-13.2.0
 
 # Source the virtual environment
 if [ -f "$current_folder/.venv/bin/activate" ]; then
