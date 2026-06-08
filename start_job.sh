@@ -55,5 +55,11 @@ run_name="${group}_${cleaned}"
 
 mkdir -p "$current_folder/out"
 
-# Start the cluster job
-python "$current_folder/run.py" experiment="$experiment" logger.wandb.name="$run_name" "$@"
+# Start the cluster job.
+# RichProgressBar crashes when stdout is not a TTY (Slurm redirects to a file)
+python "$current_folder/run.py" \
+    experiment="$experiment" \
+    logger.wandb.name="$run_name" \
+    '~callbacks.rich_progress_bar' \
+    ++trainer.enable_progress_bar=False \
+    "$@"
