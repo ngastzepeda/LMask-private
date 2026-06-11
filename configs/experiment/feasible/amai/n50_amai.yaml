@@ -31,9 +31,9 @@ trainer:
 
 callbacks:
   model_checkpoint:
-    save_top_k: -1
+    save_top_k: 1
     save_last: True
     every_n_epochs: 1
     dirpath:  ${paths.output_dir}/checkpoints
-    filename: "{epoch:03d}-max_aug_reward{val/max_aug_reward:.2f}"
+    filename: "best"
     monitor: "val/max_aug_reward"

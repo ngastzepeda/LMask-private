@@ -3,6 +3,16 @@
 # Submits one Slurm job per experiment config under configs/experiment/feasible/.
 # Each job is launched via start_job.sh with the experiment path passed as the
 # Hydra `experiment=` argument (no .yaml suffix, relative to configs/experiment/).
+#
+# Usage:
+#   ./submit_jobs.sh                 # seed=33609 (default)
+#   ./submit_jobs.sh 1234            # override the seed for all jobs
+#   ./submit_jobs.sh 1234 model.batch_size=128   # plus extra Hydra overrides
+# The first argument is the seed; any further arguments are forwarded verbatim
+# to run.py as additional Hydra overrides.
+
+seed="${1:-33609}"
+extra_overrides=("${@:2}")
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 config_root="$script_dir/configs/experiment"
@@ -30,6 +40,7 @@ for cfg in "${configs[@]}"; do
     # Use the experiment slug as the Slurm job name (drives %x in output files)
     job_name="${experiment//\//_}"
 
-    echo "Submitting: $experiment (job-name=$job_name)"
-    sbatch --job-name="$job_name" "$script_dir/start_job.sh" "$experiment"
+    echo "Submitting: $experiment (job-name=$job_name, seed=$seed)"
+    sbatch --job-name="$job_name" "$script_dir/start_job.sh" \
+        "$experiment" "seed=$seed" "${extra_overrides[@]}"
 done
