@@ -19,6 +19,10 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 
+# wandb-core sometimes needs >30s (default) to start on busy nodes; a timeout
+# kills the job at wandb.init with ServicePollForTokenError. Wait up to 5 min.
+export WANDB__SERVICE_WAIT=300
+
 # Use the directory from which the job was submitted
 current_folder="$SLURM_SUBMIT_DIR"
 cd "$current_folder" || { echo "Error: Could not change to $current_folder"; exit 1; }
