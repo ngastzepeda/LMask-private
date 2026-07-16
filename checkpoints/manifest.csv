@@ -1,0 +1,17 @@
+run,kind,source,epoch,score
+amai_n100_mw,best,logs/runs/amai_n100_mw/2026-06-11_10/checkpoints/best.ckpt,462,-9.745402336120605
+amai_n100_mw,last,logs/runs/amai_n100_mw/2026-06-11_10/checkpoints/last.ckpt,499,-9.745402336120605
+amai_n100_sw,best,logs/runs/amai_n100_sw/2026-06-11_10/checkpoints/best.ckpt,495,-10.583723068237305
+amai_n100_sw,last,logs/runs/amai_n100_sw/2026-06-11_10/checkpoints/last.ckpt,499,-10.583723068237305
+amai_n20,best,logs/runs/amai_n20/2026-06-11_10/checkpoints/best.ckpt,99,-4.0331926345825195
+amai_n20,last,logs/runs/amai_n20/2026-06-11_10/checkpoints/last.ckpt,99,-4.0331926345825195
+amai_n50,best,logs/runs/amai_n50/2026-06-11_10/checkpoints/best.ckpt,481,-7.950035095214844
+amai_n50,last,logs/runs/amai_n50/2026-06-11_10/checkpoints/last.ckpt,499,-7.950035095214844
+lmask_n100_mw,best,logs/runs/lmask_n100_mw/2026-06-11_10/checkpoints/best.ckpt,634,-9.734354019165039
+lmask_n100_mw,last,logs/runs/lmask_n100_mw/2026-07-10_12/checkpoints/last.ckpt,999,-9.735968589782715
+lmask_n100_sw,best,logs/runs/lmask_n100_sw/2026-07-10_12/checkpoints/best.ckpt,914,-10.572312355041504
+lmask_n100_sw,last,logs/runs/lmask_n100_sw/2026-07-10_12/checkpoints/last.ckpt,999,-10.572312355041504
+lmask_n20,best,logs/runs/lmask_n20/2026-06-11_10/checkpoints/best.ckpt,914,-4.004329204559326
+lmask_n20,last,logs/runs/lmask_n20/2026-06-11_10/checkpoints/last.ckpt,999,-4.004329204559326
+lmask_n50,best,logs/runs/lmask_n50/2026-06-11_10/checkpoints/best.ckpt,974,-7.932889461517334
+lmask_n50,last,logs/runs/lmask_n50/2026-06-11_10/checkpoints/last.ckpt,999,-7.932889461517334
