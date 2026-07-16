@@ -3,8 +3,8 @@
 # Wrapper for gather_checkpoints.py (same convention as resume_jobs.sh):
 # load the Python module, source the venv, then run the gather script.
 #
-#   bash gather_checkpoints.sh                # gather into checkpoints/ and git add
-#   bash gather_checkpoints.sh --no-git-add   # just copy, don't touch git
+#   bash gather_checkpoints.sh                # copy into checkpoints/ (no git)
+#   bash gather_checkpoints.sh --git-add      # ...and git add the folder
 
 module load lang/Python/3.12.3-GCCcore-13.2.0
 

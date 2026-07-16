@@ -4,8 +4,8 @@
 Runs on the cluster from the repo root, ALWAYS via the bash wrapper (which
 loads the Python module and sources the venv):
 
-    bash gather_checkpoints.sh                # gather into checkpoints/ and git add
-    bash gather_checkpoints.sh --no-git-add   # just copy, don't touch git
+    bash gather_checkpoints.sh                # copy into checkpoints/ (no git)
+    bash gather_checkpoints.sh --git-add      # ...and git add the folder
     bash gather_checkpoints.sh --dest somedir # different destination folder
 
 IMPORTANT: resumed runs create one timestamp dir per attempt
@@ -29,7 +29,7 @@ attempt's wandb id and every older attempt sharing it:
   - last.ckpt: among lineage attempts, pick the one with the highest epoch
     stored in the checkpoint. Falls back to the newest attempt's last.ckpt.
 
-Copies go to <dest>/<run_name>/{best.ckpt,last.ckpt} plus a manifest.csv
+Copies go to flat files <dest>/<run_name>_{best,last}.ckpt plus a manifest.csv
 recording source path, epoch, and score for provenance. logs/ is gitignored,
 so copying out is required for the checkpoints to be committable at all.
 """
@@ -134,7 +134,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--logs-dir", default="logs/runs", help="root of run dirs")
     ap.add_argument("--dest", default="checkpoints", help="destination folder")
-    ap.add_argument("--no-git-add", action="store_true", help="skip git add")
+    ap.add_argument("--git-add", action="store_true",
+                    help="git add the destination folder after copying")
     args = ap.parse_args()
 
     if not os.path.isdir(args.logs_dir):
@@ -155,14 +156,13 @@ def main():
             print(f"- {name}: no checkpoints in any attempt -> skip", file=sys.stderr)
             continue
 
-        out_dir = os.path.join(args.dest, name)
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(args.dest, exist_ok=True)
         for kind, cand in (("best", best), ("last", last)):
             if cand is None:
                 print(f"- {name}: no {kind}.ckpt found", file=sys.stderr)
                 continue
             _, src, epoch, score = cand
-            dst = os.path.join(out_dir, f"{kind}.ckpt")
+            dst = os.path.join(args.dest, f"{name}_{kind}.ckpt")
             shutil.copy2(src, dst)
             rows.append(dict(run=name, kind=kind, source=src, epoch=epoch, score=score))
             print(f"{name:24} {kind}: epoch={epoch} score={score}  <- {src}")
@@ -177,7 +177,7 @@ def main():
         writer.writerows(rows)
     print(f"\nWrote manifest: {manifest}")
 
-    if not args.no_git_add:
+    if args.git_add:
         subprocess.run(["git", "add", args.dest], check=True)
         print(f"git add {args.dest} done -- review with 'git status', then commit.")
 
