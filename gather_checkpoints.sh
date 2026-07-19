@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=lmask-gather-ckpts
+#SBATCH -p normal
 #SBATCH --output=out/gather_ckpt/%j.out
 #SBATCH --error=out/gather_ckpt/%j.err
 #SBATCH --time=02:00:00
