@@ -1,0 +1,9 @@
+##### ----- NEW EVALUATION RUN ----- #####
+2026-07-23 16:29:30 | TSPTW | n100_amai_mw - amai (last):	 997 & 975.129 & 0.749 & 0.811 | ckpt_path: checkpoints/amai_n100_mw_last.ckpt
+2026-07-23 16:29:32 | TSPTW | n100_amai_sw - amai (last):	 979 & 1057.608 & 0.479 & 0.813 | ckpt_path: checkpoints/amai_n100_sw_last.ckpt
+2026-07-23 16:29:33 | TSPTW | n20_amai - amai (last):	 996 & 404.113 & 1.707 & 0.122 | ckpt_path: checkpoints/amai_n20_last.ckpt
+2026-07-23 16:29:34 | TSPTW | n50_amai - amai (last):	 961 & 797.871 & 2.072 & 0.268 | ckpt_path: checkpoints/amai_n50_last.ckpt
+2026-07-23 16:29:36 | TSPTW | n100_amai_mw - lmask (last):	 994 & 974.154 & 0.673 & 0.806 | ckpt_path: checkpoints/lmask_n100_mw_last.ckpt
+2026-07-23 16:29:38 | TSPTW | n100_amai_sw - lmask (last):	 974 & 1056.167 & 0.353 & 0.827 | ckpt_path: checkpoints/lmask_n100_sw_last.ckpt
+2026-07-23 16:29:40 | TSPTW | n20_amai - lmask (last):	 990 & 400.990 & 0.912 & 0.129 | ckpt_path: checkpoints/lmask_n20_last.ckpt
+2026-07-23 16:29:42 | TSPTW | n50_amai - lmask (last):	 954 & 794.807 & 1.762 & 0.292 | ckpt_path: checkpoints/lmask_n50_last.ckpt

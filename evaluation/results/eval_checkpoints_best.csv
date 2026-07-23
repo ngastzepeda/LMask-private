@@ -1,0 +1,9 @@
+variant,size,instance_dir,mode,feas_count,cost,gap_bks,inference_time,ckpt_path
+amai,n100_mw,n100_amai_mw,best,997,974.986,0.7426,1.101,checkpoints/amai_n100_mw_best.ckpt
+amai,n100_sw,n100_amai_sw,best,973,1057.4224,0.4709,0.819,checkpoints/amai_n100_sw_best.ckpt
+amai,n20,n20_amai,best,996,404.1129,1.7073,0.131,checkpoints/amai_n20_best.ckpt
+amai,n50,n50_amai,best,958,797.8548,2.0788,0.272,checkpoints/amai_n50_best.ckpt
+lmask,n100_mw,n100_amai_mw,best,997,973.9753,0.6408,0.814,checkpoints/lmask_n100_mw_best.ckpt
+lmask,n100_sw,n100_amai_sw,best,975,1056.2717,0.361,0.815,checkpoints/lmask_n100_sw_best.ckpt
+lmask,n20,n20_amai,best,993,401.1884,0.9442,0.131,checkpoints/lmask_n20_best.ckpt
+lmask,n50,n50_amai,best,955,794.702,1.7222,0.27,checkpoints/lmask_n50_best.ckpt
