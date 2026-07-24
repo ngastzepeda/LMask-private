@@ -10,7 +10,7 @@ costs match AMAI's ``cost * domain_size``), but instead of aggregating over the
 
 Output layout (one csv per evaluated checkpoint)::
 
-    evaluation/instance_results/{size}/{variant}/{mode}.csv
+    evaluation/instance_results/{size}/{variant}_{mode}.csv
 
 with ``size`` in {n20, n50, n100_sw, n100_mw}, ``variant`` in {lmask, amai}, and
 ``mode`` in {best, last}. Each csv has columns:
@@ -205,9 +205,9 @@ if __name__ == "__main__":
             df = evaluate_ckpt(job["ckpt"], job["size"], device, args.batch_size)
             if df is None:
                 continue
-            out_dir = INSTANCE_RESULTS_DIR / job["size"] / job["variant"]
+            out_dir = INSTANCE_RESULTS_DIR / job["size"]
             os.makedirs(out_dir, exist_ok=True)
-            out_path = out_dir / f"{mode}.csv"
+            out_path = out_dir / f"{job['variant']}_{mode}.csv"
             df.to_csv(out_path, index=False)
 
             n_feas = int(df["feasibility"].sum())

@@ -4,7 +4,7 @@
 # eval on the workstation's GPU. Works from the project root or from evaluation/.
 # stdout/stderr are mirrored into a timestamped log file, in addition to the
 # per-checkpoint csvs eval_instance_results.py writes under
-# evaluation/instance_results/{size}/{variant}/ and its own rotating
+# evaluation/instance_results/{size}/ and its own rotating
 # evaluation/logs/eval_instance_results.log.
 #
 #   bash evaluation/eval_instance_results.sh              # eval all best ckpts on cuda
